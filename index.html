@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Project Kanto: Pokedex v3.0</title>
+    <title>Project Kanto: Pokedex v3.1 (Unlimited)</title>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -84,7 +84,8 @@
             Sparkles: (props) => <Icon {...props} path={<><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"></path></>} />,
             GitBranch: (props) => <Icon {...props} path={<><line x1="6" y1="3" x2="6" y2="15"></line><circle cx="18" cy="6" r="3"></circle><circle cx="6" cy="18" r="3"></circle><path d="M18 9a9 9 0 0 1-9 9"></path></>} />,
             Layers: (props) => <Icon {...props} path={<><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></>} />,
-            ArrowRight: (props) => <Icon {...props} path={<><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></>} />
+            ArrowRight: (props) => <Icon {...props} path={<><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></>} />,
+            ArrowDown: (props) => <Icon {...props} path={<><line x1="12" y1="5" x2="12" y2="19"></line><polyline points="19 12 12 19 5 12"></polyline></>} />
         };
 
         // --- Constants & Configuration ---
@@ -182,8 +183,6 @@
                     : `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${id}.png`;
             }
 
-            // Fallback logic handles inside img onError usually, but we can rely on static fallback from parent for main view
-            // Here we just render the simple img tag
             return (
                 <img 
                     src={url} 
@@ -191,7 +190,6 @@
                     className={`${className} ${isAnimatedAvailable ? 'rendering-pixelated' : ''}`}
                     loading="lazy"
                     onError={(e) => {
-                        // Fallback to static if animated fails
                         if (isAnimatedAvailable) {
                             e.target.src = isShiny
                                 ? `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/shiny/${id}.png`
@@ -235,9 +233,8 @@
                     
                     {node.evolves_to.length > 0 && (
                         <div className="flex flex-col items-center mt-2">
-                            <Icons.ArrowDown size={16} className="text-gray-500 mb-2 rotate-90 md:rotate-0" /> {/* Use ArrowRight mostly but here vertical flow might be better? Let's do horizontal flow with flex */}
+                            <Icons.ArrowDown size={16} className="text-gray-500 mb-2 rotate-90 md:rotate-0" />
                             <div className="flex gap-4 md:gap-8 relative">
-                                {/* Connector lines could go here but keeping it simple */}
                                 {node.evolves_to.map((child, idx) => (
                                     <EvolutionNode key={idx} node={child} onNavigate={onNavigate} />
                                 ))}
@@ -272,7 +269,6 @@
             if (loading) return <div className="text-xs text-gray-500 animate-pulse">Loading Genetics...</div>;
             if (!chain) return <div className="text-xs text-gray-500">No Evolution Data</div>;
 
-            // Recursive render wrapper to allow horizontal layout
             const renderTree = (node) => {
                 const id = getIdFromUrl(node.species.url);
                 return (
@@ -311,13 +307,11 @@
         };
 
         const DetailModal = ({ pokemon: initialPokemon, onClose }) => {
-            // We manage ID internally to allow switching forms/evolutions without closing modal
             const [currentId, setCurrentId] = useState(initialPokemon.id);
-            
             const [details, setDetails] = useState(null);
             const [species, setSpecies] = useState(null);
             const [loading, setLoading] = useState(true);
-            const [activeTab, setActiveTab] = useState('info'); // info | stats | evo
+            const [activeTab, setActiveTab] = useState('info'); 
             const [isShiny, setIsShiny] = useState(false);
 
             const playCry = (idToPlay) => {
@@ -330,14 +324,10 @@
                 const fetchDetails = async () => {
                     setLoading(true);
                     try {
-                        // 1. Fetch Basic Details (Stats, Types, etc)
                         const pokeRes = await fetch(`https://pokeapi.co/api/v2/pokemon/${currentId}`);
                         const pokeData = await pokeRes.json();
                         setDetails(pokeData);
 
-                        // 2. Fetch Species (Flavor Text, Evolution URL, Varieties)
-                        // Note: pokeData.species.url contains the species URL, but for forms (like Gengar-Mega), 
-                        // the species is still "Gengar". We need the species data for the dropdown and description.
                         const speciesRes = await fetch(pokeData.species.url);
                         const speciesData = await speciesRes.json();
                         setSpecies(speciesData);
@@ -350,13 +340,11 @@
                 };
 
                 fetchDetails();
-                setIsShiny(false); // Reset shiny on new pokemon load
+                setIsShiny(false); 
             }, [currentId]);
 
-            // Handle variety switching
             const handleVarietyChange = (e) => {
                 const newName = e.target.value;
-                // Find the variety object to get the URL/ID
                 const variant = species.varieties.find(v => v.pokemon.name === newName);
                 if (variant) {
                     const newId = getIdFromUrl(variant.pokemon.url);
@@ -364,7 +352,7 @@
                 }
             };
 
-            if (!details) return null; // Initial loading state handled by parent mostly, but safety check
+            if (!details) return null;
 
             const flavorText = species?.flavor_text_entries?.find(entry => entry.language.name === 'en')?.flavor_text.replace(/\f/g, ' ') || "Data unknown.";
             const category = species?.genera?.find(entry => entry.language.name === 'en')?.genus || "Unknown Pokémon";
@@ -398,9 +386,7 @@
                                     
                                     {/* Left Column: Visuals */}
                                     <div className="space-y-4">
-                                        {/* Image Container */}
                                         <div className="bg-gray-200 rounded-xl p-6 border-4 border-gray-400 relative shadow-inner flex flex-col items-center">
-                                            {/* Shiny Toggle */}
                                             <button 
                                                 onClick={() => setIsShiny(!isShiny)}
                                                 className={`absolute top-3 right-3 p-2 rounded-full shadow-sm transition-all ${isShiny ? 'bg-yellow-400 text-white rotate-12 scale-110' : 'bg-gray-300 text-gray-500 hover:bg-gray-400'}`}
@@ -426,7 +412,6 @@
                                             </div>
                                         </div>
 
-                                        {/* Type Badges */}
                                         <div className="flex gap-2 justify-center flex-wrap">
                                             {details.types.map((t) => (
                                                 <span key={t.type.name} className={`${TYPE_COLORS[t.type.name] || 'bg-gray-500'} text-white px-4 py-1 rounded-full text-sm font-bold uppercase tracking-wider shadow-sm border border-white/20`}>
@@ -435,7 +420,6 @@
                                             ))}
                                         </div>
 
-                                        {/* Forms Dropdown */}
                                         {species && species.varieties.length > 1 && (
                                             <div className="bg-gray-900 p-3 rounded-lg border border-gray-700 flex items-center gap-3">
                                                 <Icons.Layers size={18} className="text-gray-400" />
@@ -456,7 +440,6 @@
 
                                     {/* Right Column: Data */}
                                     <div className="bg-gray-900 rounded-xl p-1 flex flex-col text-green-400 font-mono border-2 border-gray-700 shadow-[inset_0_0_20px_rgba(0,0,0,0.5)] min-h-[400px]">
-                                        {/* Tab Navigation */}
                                         <div className="flex border-b border-gray-700 bg-gray-800/50 rounded-t-lg">
                                             {['info', 'stats', 'evolution'].map(tab => (
                                                 <button 
@@ -560,7 +543,7 @@
                                 <Icons.Volume2 size={16} />
                                 Play Cry
                             </button>
-                            <span className="text-gray-500 text-xs font-mono">VER. 3.0 ULTIMATE</span>
+                            <span className="text-gray-500 text-xs font-mono">VER. 3.1 UNLIMITED</span>
                         </div>
                     </div>
                 </div>
@@ -716,9 +699,8 @@
                                 ) : (
                                     <>
                                         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 pb-10">
-                                            {filteredPokemon.slice(0, 200).map((p) => <PokemonCard key={p.id} p={p} onClick={setSelectedPokemon} />)}
+                                            {filteredPokemon.map((p) => <PokemonCard key={p.id} p={p} onClick={setSelectedPokemon} />)}
                                         </div>
-                                        {filteredPokemon.length > 200 && <div className="text-center py-8 border-t border-gray-800 text-gray-500 text-sm font-mono">Only showing first 200 results. Refine your filters to see specific Pokemon.</div>}
                                         {filteredPokemon.length === 0 && (
                                             <div className="text-center py-20 text-gray-500">
                                                 <p className="text-xl font-bold mb-2">No Pokemon Found</p>
