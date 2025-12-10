@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Project Kanto: Pokedex v3.1 (Unlimited)</title>
+    <title>Project Kanto: Pokedex v3.3 (Unlimited)</title>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -42,9 +42,6 @@
         ::-webkit-scrollbar-thumb:hover {
             background: #4b5563; 
         }
-        .shiny-gradient {
-            background: linear-gradient(135deg, #f6d365 0%, #fda085 100%);
-        }
     </style>
 </head>
 <body class="bg-slate-900 text-gray-100 font-sans selection:bg-red-500 selection:text-white">
@@ -82,7 +79,6 @@
             ChevronDown: (props) => <Icon {...props} path={<><polyline points="6 9 12 15 18 9"></polyline></>} />,
             Check: (props) => <Icon {...props} path={<><polyline points="20 6 9 17 4 12"></polyline></>} />,
             Sparkles: (props) => <Icon {...props} path={<><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"></path></>} />,
-            GitBranch: (props) => <Icon {...props} path={<><line x1="6" y1="3" x2="6" y2="15"></line><circle cx="18" cy="6" r="3"></circle><circle cx="6" cy="18" r="3"></circle><path d="M18 9a9 9 0 0 1-9 9"></path></>} />,
             Layers: (props) => <Icon {...props} path={<><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></>} />,
             ArrowRight: (props) => <Icon {...props} path={<><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></>} />,
             ArrowDown: (props) => <Icon {...props} path={<><line x1="12" y1="5" x2="12" y2="19"></line><polyline points="19 12 12 19 5 12"></polyline></>} />
@@ -107,6 +103,7 @@
             dragon: 'bg-indigo-700',
             steel: 'bg-gray-500',
             fairy: 'bg-pink-300 text-gray-800',
+            dark: 'bg-slate-700 text-white',
         };
 
         const GENERATIONS = [
@@ -143,19 +140,65 @@
 
             useEffect(() => {
                 const fetchAll = async () => {
+                    setLoading(true);
                     try {
-                        const res = await fetch('https://pokeapi.co/api/v2/pokemon?limit=1025');
-                        const data = await res.json();
+                        const query = `
+                        query {
+                          pokemon_v2_pokemonspecies(order_by: {id: asc}, where: {pokemon_v2_pokemons: {is_default: {_eq: true}}}) {
+                            id
+                            name
+                            generation_id
+                            evolves_from_species_id
+                            pokemon_v2_pokemons(limit: 1) {
+                              types: pokemon_v2_pokemontypes {
+                                type: pokemon_v2_type {
+                                  name
+                                }
+                              }
+                            }
+                          }
+                        }
+                        `;
+
+                        const res = await fetch('https://beta.pokeapi.co/graphql/v1beta', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ query })
+                        });
                         
-                        const formatted = data.results.map((p) => ({
-                            name: p.name,
-                            id: getIdFromUrl(p.url),
-                            url: p.url,
-                        }));
+                        const json = await res.json();
+                        const speciesList = json.data.pokemon_v2_pokemonspecies;
+
+                        const parentIds = new Set();
+                        speciesList.forEach(p => {
+                            if (p.evolves_from_species_id) parentIds.add(p.evolves_from_species_id);
+                        });
+
+                        const formatted = speciesList.map(p => {
+                            const types = p.pokemon_v2_pokemons[0]?.types.map(t => t.type.name) || [];
+                            
+                            let stage = 1;
+                            if (p.evolves_from_species_id) {
+                                stage = 2;
+                                const parent = speciesList.find(s => s.id === p.evolves_from_species_id);
+                                if (parent && parent.evolves_from_species_id) {
+                                    stage = 3;
+                                }
+                            }
+
+                            return {
+                                id: p.id,
+                                name: p.name,
+                                types: new Set(types),
+                                generation: p.generation_id,
+                                stage: stage,
+                                isFullyEvolved: !parentIds.has(p.id)
+                            };
+                        });
                         
                         setPokemon(formatted);
                     } catch (err) {
-                        console.error("Failed to fetch pokemon list", err);
+                        console.error("Failed to fetch pokemon list via GraphQL", err);
                     } finally {
                         setLoading(false);
                     }
@@ -170,8 +213,6 @@
 
         const PokemonSprite = ({ id, name, isShiny = false, className = "", animate = true }) => {
             const isAnimatedAvailable = id <= 649 && animate;
-            
-            // Determine base path
             let url;
             if (isAnimatedAvailable) {
                 url = isShiny 
@@ -215,29 +256,21 @@
             );
         };
 
-        // Recursive Evolution Node Component
         const EvolutionNode = ({ node, onNavigate }) => {
             const id = getIdFromUrl(node.species.url);
-            
             return (
                 <div className="flex flex-col items-center">
-                    <div 
-                        onClick={() => onNavigate(id)}
-                        className="cursor-pointer hover:scale-110 transition-transform flex flex-col items-center p-2 rounded-lg hover:bg-gray-700/50"
-                    >
+                    <div onClick={() => onNavigate(id)} className="cursor-pointer hover:scale-110 transition-transform flex flex-col items-center p-2 rounded-lg hover:bg-gray-700/50">
                         <div className="w-16 h-16 flex items-center justify-center">
                             <PokemonSprite id={id} name={node.species.name} className="w-full h-full object-contain" />
                         </div>
                         <span className="text-xs font-bold text-gray-300 capitalize mt-1">{node.species.name}</span>
                     </div>
-                    
                     {node.evolves_to.length > 0 && (
                         <div className="flex flex-col items-center mt-2">
                             <Icons.ArrowDown size={16} className="text-gray-500 mb-2 rotate-90 md:rotate-0" />
                             <div className="flex gap-4 md:gap-8 relative">
-                                {node.evolves_to.map((child, idx) => (
-                                    <EvolutionNode key={idx} node={child} onNavigate={onNavigate} />
-                                ))}
+                                {node.evolves_to.map((child, idx) => <EvolutionNode key={idx} node={child} onNavigate={onNavigate} />)}
                             </div>
                         </div>
                     )}
@@ -245,7 +278,6 @@
             );
         };
         
-        // Horizontal Evolution Row Component
         const EvolutionChain = ({ chainUrl, onNavigate }) => {
             const [chain, setChain] = useState(null);
             const [loading, setLoading] = useState(true);
@@ -257,11 +289,7 @@
                         const res = await fetch(chainUrl);
                         const data = await res.json();
                         setChain(data.chain);
-                    } catch(e) {
-                        console.error(e);
-                    } finally {
-                        setLoading(false);
-                    }
+                    } catch(e) { console.error(e); } finally { setLoading(false); }
                 };
                 if (chainUrl) fetchChain();
             }, [chainUrl]);
@@ -273,25 +301,17 @@
                 const id = getIdFromUrl(node.species.url);
                 return (
                     <div className="flex items-center gap-2">
-                        <div 
-                            onClick={() => onNavigate(id)}
-                            className="flex flex-col items-center cursor-pointer group"
-                        >
+                        <div onClick={() => onNavigate(id)} className="flex flex-col items-center cursor-pointer group">
                             <div className="w-16 h-16 bg-gray-700/30 rounded-full flex items-center justify-center group-hover:bg-gray-600/50 transition-colors border-2 border-transparent group-hover:border-blue-400">
                                 <PokemonSprite id={id} name={node.species.name} className="w-12 h-12" />
                             </div>
                             <span className="text-[10px] uppercase font-bold text-gray-400 mt-1 group-hover:text-white">{node.species.name}</span>
                         </div>
-
                         {node.evolves_to.length > 0 && (
                             <div className="flex items-center">
                                 <div className="mx-2 text-gray-600"><Icons.ArrowRight size={20} /></div>
                                 <div className="flex flex-col gap-4">
-                                    {node.evolves_to.map((child, i) => (
-                                        <div key={i} className="flex items-center">
-                                            {renderTree(child)}
-                                        </div>
-                                    ))}
+                                    {node.evolves_to.map((child, i) => <div key={i} className="flex items-center">{renderTree(child)}</div>)}
                                 </div>
                             </div>
                         )}
@@ -331,14 +351,8 @@
                         const speciesRes = await fetch(pokeData.species.url);
                         const speciesData = await speciesRes.json();
                         setSpecies(speciesData);
-
-                    } catch (err) {
-                        console.error("Failed to fetch details", err);
-                    } finally {
-                        setLoading(false);
-                    }
+                    } catch (err) { console.error("Failed to fetch details", err); } finally { setLoading(false); }
                 };
-
                 fetchDetails();
                 setIsShiny(false); 
             }, [currentId]);
@@ -360,8 +374,6 @@
             return (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
                     <div className="bg-red-600 w-full max-w-3xl rounded-2xl shadow-2xl overflow-hidden border-4 border-red-800 flex flex-col max-h-[90vh]">
-                        
-                        {/* Header */}
                         <div className="bg-red-700 p-4 flex justify-between items-center shadow-md z-10">
                             <div className="flex items-center gap-3">
                                 <div className="h-3 w-3 rounded-full bg-blue-400 animate-pulse shadow-[0_0_8px_#60a5fa]"></div>
@@ -369,12 +381,8 @@
                                 <div className="h-3 w-3 rounded-full bg-yellow-400"></div>
                             </div>
                             <h2 className="text-white font-mono font-bold text-xl tracking-wider uppercase hidden md:block">Entry #{String(currentId).padStart(4,'0')}</h2>
-                            <button onClick={onClose} className="text-white hover:text-gray-200 transition-colors">
-                                <Icons.X size={28} />
-                            </button>
+                            <button onClick={onClose} className="text-white hover:text-gray-200 transition-colors"><Icons.X size={28} /></button>
                         </div>
-
-                        {/* Content Area */}
                         <div className="flex-1 overflow-y-auto p-6 bg-gray-800">
                             {loading ? (
                                 <div className="h-64 flex flex-col items-center justify-center text-green-400 font-mono space-y-4">
@@ -383,167 +391,50 @@
                                 </div>
                             ) : (
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                    
-                                    {/* Left Column: Visuals */}
                                     <div className="space-y-4">
                                         <div className="bg-gray-200 rounded-xl p-6 border-4 border-gray-400 relative shadow-inner flex flex-col items-center">
-                                            <button 
-                                                onClick={() => setIsShiny(!isShiny)}
-                                                className={`absolute top-3 right-3 p-2 rounded-full shadow-sm transition-all ${isShiny ? 'bg-yellow-400 text-white rotate-12 scale-110' : 'bg-gray-300 text-gray-500 hover:bg-gray-400'}`}
-                                                title="Toggle Shiny"
-                                            >
-                                                <Icons.Sparkles size={20} fill={isShiny ? "currentColor" : "none"} />
-                                            </button>
-
+                                            <button onClick={() => setIsShiny(!isShiny)} className={`absolute top-3 right-3 p-2 rounded-full shadow-sm transition-all ${isShiny ? 'bg-yellow-400 text-white rotate-12 scale-110' : 'bg-gray-300 text-gray-500 hover:bg-gray-400'}`} title="Toggle Shiny"><Icons.Sparkles size={20} fill={isShiny ? "currentColor" : "none"} /></button>
                                             <div className="absolute top-2 left-1/2 -translate-x-1/2 w-2 h-2 bg-red-500 rounded-full animate-ping"></div>
-                                            
-                                            <div className="w-40 h-40 flex items-center justify-center mb-4">
-                                                 <PokemonSprite 
-                                                    id={currentId} 
-                                                    name={details.name} 
-                                                    isShiny={isShiny} 
-                                                    className="w-full h-full object-contain scale-125" 
-                                                 />
-                                            </div>
-
-                                            <div className="bg-green-900/10 w-full rounded-lg p-2 text-center">
-                                                <h1 className="text-2xl font-black text-gray-800 uppercase tracking-widest font-mono truncate">{details.name.replace(/-/g, ' ')}</h1>
-                                                <p className="text-gray-600 font-medium text-sm">{category}</p>
-                                            </div>
+                                            <div className="w-40 h-40 flex items-center justify-center mb-4"><PokemonSprite id={currentId} name={details.name} isShiny={isShiny} className="w-full h-full object-contain scale-125" /></div>
+                                            <div className="bg-green-900/10 w-full rounded-lg p-2 text-center"><h1 className="text-2xl font-black text-gray-800 uppercase tracking-widest font-mono truncate">{details.name.replace(/-/g, ' ')}</h1><p className="text-gray-600 font-medium text-sm">{category}</p></div>
                                         </div>
-
                                         <div className="flex gap-2 justify-center flex-wrap">
-                                            {details.types.map((t) => (
-                                                <span key={t.type.name} className={`${TYPE_COLORS[t.type.name] || 'bg-gray-500'} text-white px-4 py-1 rounded-full text-sm font-bold uppercase tracking-wider shadow-sm border border-white/20`}>
-                                                    {t.type.name}
-                                                </span>
-                                            ))}
+                                            {details.types.map((t) => <span key={t.type.name} className={`${TYPE_COLORS[t.type.name] || 'bg-gray-500'} text-white px-4 py-1 rounded-full text-sm font-bold uppercase tracking-wider shadow-sm border border-white/20`}>{t.type.name}</span>)}
                                         </div>
-
                                         {species && species.varieties.length > 1 && (
                                             <div className="bg-gray-900 p-3 rounded-lg border border-gray-700 flex items-center gap-3">
                                                 <Icons.Layers size={18} className="text-gray-400" />
-                                                <select 
-                                                    className="bg-gray-800 text-white text-sm w-full p-1 rounded border border-gray-600 focus:outline-none focus:border-blue-500 uppercase font-bold"
-                                                    onChange={handleVarietyChange}
-                                                    value={details.name}
-                                                >
-                                                    {species.varieties.map((v) => (
-                                                        <option key={v.pokemon.name} value={v.pokemon.name}>
-                                                            {v.pokemon.name.replace(/-/g, ' ')} {v.is_default ? '(Default)' : ''}
-                                                        </option>
-                                                    ))}
-                                                </select>
+                                                <select className="bg-gray-800 text-white text-sm w-full p-1 rounded border border-gray-600 focus:outline-none focus:border-blue-500 uppercase font-bold" onChange={handleVarietyChange} value={details.name}>{species.varieties.map((v) => <option key={v.pokemon.name} value={v.pokemon.name}>{v.pokemon.name.replace(/-/g, ' ')} {v.is_default ? '(Default)' : ''}</option>)}</select>
                                             </div>
                                         )}
                                     </div>
-
-                                    {/* Right Column: Data */}
                                     <div className="bg-gray-900 rounded-xl p-1 flex flex-col text-green-400 font-mono border-2 border-gray-700 shadow-[inset_0_0_20px_rgba(0,0,0,0.5)] min-h-[400px]">
                                         <div className="flex border-b border-gray-700 bg-gray-800/50 rounded-t-lg">
-                                            {['info', 'stats', 'evolution'].map(tab => (
-                                                <button 
-                                                    key={tab}
-                                                    onClick={() => setActiveTab(tab)}
-                                                    className={`flex-1 py-3 text-xs font-bold uppercase tracking-wider transition-all ${activeTab === tab ? 'bg-green-900/20 text-green-400 border-b-2 border-green-500' : 'text-gray-500 hover:text-gray-300'}`}
-                                                >
-                                                    {tab}
-                                                </button>
-                                            ))}
+                                            {['info', 'stats', 'evolution'].map(tab => <button key={tab} onClick={() => setActiveTab(tab)} className={`flex-1 py-3 text-xs font-bold uppercase tracking-wider transition-all ${activeTab === tab ? 'bg-green-900/20 text-green-400 border-b-2 border-green-500' : 'text-gray-500 hover:text-gray-300'}`}>{tab}</button>)}
                                         </div>
-
                                         <div className="p-4 flex-1 overflow-y-auto">
                                             {activeTab === 'stats' && (
                                                 <div className="space-y-4">
-                                                    {details.stats.map((s) => (
-                                                        <div key={s.stat.name} className="space-y-1">
-                                                            <div className="flex justify-between text-xs font-bold uppercase">
-                                                                <span>{STAT_LABELS[s.stat.name] || s.stat.name}</span>
-                                                                <span>{s.base_stat}</span>
-                                                            </div>
-                                                            <div className="h-2 bg-gray-800 rounded-full overflow-hidden border border-gray-700">
-                                                                <div 
-                                                                    className="h-full bg-green-500 transition-all duration-1000 ease-out"
-                                                                    style={{ width: `${Math.min(100, (s.base_stat / 200) * 100)}%` }}
-                                                                ></div>
-                                                            </div>
-                                                        </div>
-                                                    ))}
-                                                    <div className="pt-3 mt-2 border-t border-green-900/50 flex justify-between text-xs text-green-600 font-bold">
-                                                        <span>TOTAL BST</span>
-                                                        <span>{details.stats.reduce((acc, curr) => acc + curr.base_stat, 0)}</span>
-                                                    </div>
+                                                    {details.stats.map((s) => <div key={s.stat.name} className="space-y-1"><div className="flex justify-between text-xs font-bold uppercase"><span>{STAT_LABELS[s.stat.name] || s.stat.name}</span><span>{s.base_stat}</span></div><div className="h-2 bg-gray-800 rounded-full overflow-hidden border border-gray-700"><div className="h-full bg-green-500 transition-all duration-1000 ease-out" style={{ width: `${Math.min(100, (s.base_stat / 200) * 100)}%` }}></div></div></div>)}
+                                                    <div className="pt-3 mt-2 border-t border-green-900/50 flex justify-between text-xs text-green-600 font-bold"><span>TOTAL BST</span><span>{details.stats.reduce((acc, curr) => acc + curr.base_stat, 0)}</span></div>
                                                 </div>
                                             )}
-
                                             {activeTab === 'info' && (
                                                 <div className="space-y-6">
-                                                    <div className="grid grid-cols-2 gap-4">
-                                                        <div className="bg-gray-800 p-3 rounded border border-gray-700">
-                                                            <div className="flex items-center gap-2 text-xs text-gray-500 mb-1">
-                                                                <Icons.Ruler size={14} /> Height
-                                                            </div>
-                                                            <span className="text-lg font-bold text-white">{details.height / 10}m</span>
-                                                        </div>
-                                                        <div className="bg-gray-800 p-3 rounded border border-gray-700">
-                                                            <div className="flex items-center gap-2 text-xs text-gray-500 mb-1">
-                                                                <Icons.Weight size={14} /> Weight
-                                                            </div>
-                                                            <span className="text-lg font-bold text-white">{details.weight / 10}kg</span>
-                                                        </div>
-                                                    </div>
-
-                                                    <div className="bg-gray-800 p-3 rounded border border-gray-700">
-                                                        <div className="flex items-center gap-2 text-xs text-gray-500 mb-2">
-                                                            <Icons.Activity size={14} /> Abilities
-                                                        </div>
-                                                        <div className="flex flex-wrap gap-2">
-                                                            {details.abilities.map(a => (
-                                                                <span key={a.ability.name} className={`text-xs px-2 py-1 rounded ${a.is_hidden ? 'bg-gray-700 text-gray-400 border border-dashed border-gray-500' : 'bg-blue-900/50 text-blue-200 border border-blue-800'} capitalize`}>
-                                                                    {a.ability.name.replace('-', ' ')} {a.is_hidden && '(Hidden)'}
-                                                                </span>
-                                                            ))}
-                                                        </div>
-                                                    </div>
-
-                                                    <div>
-                                                        <h4 className="text-xs text-green-700 uppercase mb-2 font-bold">Database Entry:</h4>
-                                                        <p className="text-sm leading-relaxed text-green-300/90 italic border-l-2 border-green-700 pl-3 py-1">
-                                                            "{flavorText}"
-                                                        </p>
-                                                    </div>
+                                                    <div className="grid grid-cols-2 gap-4"><div className="bg-gray-800 p-3 rounded border border-gray-700"><div className="flex items-center gap-2 text-xs text-gray-500 mb-1"><Icons.Ruler size={14} /> Height</div><span className="text-lg font-bold text-white">{details.height / 10}m</span></div><div className="bg-gray-800 p-3 rounded border border-gray-700"><div className="flex items-center gap-2 text-xs text-gray-500 mb-1"><Icons.Weight size={14} /> Weight</div><span className="text-lg font-bold text-white">{details.weight / 10}kg</span></div></div>
+                                                    <div className="bg-gray-800 p-3 rounded border border-gray-700"><div className="flex items-center gap-2 text-xs text-gray-500 mb-2"><Icons.Activity size={14} /> Abilities</div><div className="flex flex-wrap gap-2">{details.abilities.map(a => <span key={a.ability.name} className={`text-xs px-2 py-1 rounded ${a.is_hidden ? 'bg-gray-700 text-gray-400 border border-dashed border-gray-500' : 'bg-blue-900/50 text-blue-200 border border-blue-800'} capitalize`}>{a.ability.name.replace('-', ' ')} {a.is_hidden && '(Hidden)'}</span>)}</div></div>
+                                                    <div><h4 className="text-xs text-green-700 uppercase mb-2 font-bold">Database Entry:</h4><p className="text-sm leading-relaxed text-green-300/90 italic border-l-2 border-green-700 pl-3 py-1">"{flavorText}"</p></div>
                                                 </div>
                                             )}
-
-                                            {activeTab === 'evolution' && (
-                                                <div className="flex flex-col h-full">
-                                                    <div className="flex-1 flex flex-col justify-center">
-                                                        {species && (
-                                                            <EvolutionChain 
-                                                                chainUrl={species.evolution_chain.url} 
-                                                                onNavigate={(id) => setCurrentId(id)}
-                                                            />
-                                                        )}
-                                                    </div>
-                                                    <p className="text-center text-xs text-gray-500 mt-4">Click any form to view details</p>
-                                                </div>
-                                            )}
+                                            {activeTab === 'evolution' && <div className="flex flex-col h-full"><div className="flex-1 flex flex-col justify-center">{species && <EvolutionChain chainUrl={species.evolution_chain.url} onNavigate={(id) => setCurrentId(id)} />}</div><p className="text-center text-xs text-gray-500 mt-4">Click any form to view details</p></div>}
                                         </div>
                                     </div>
                                 </div>
                             )}
                         </div>
-                        
-                        {/* Footer Actions */}
                         <div className="bg-gray-900 p-4 flex justify-between items-center border-t border-gray-800">
-                            <button 
-                                onClick={() => playCry(currentId)}
-                                className="bg-blue-500 hover:bg-blue-400 active:bg-blue-600 text-white px-4 py-2 rounded shadow text-xs font-bold uppercase tracking-wider flex items-center gap-2 transition-all"
-                            >
-                                <Icons.Volume2 size={16} />
-                                Play Cry
-                            </button>
-                            <span className="text-gray-500 text-xs font-mono">VER. 3.1 UNLIMITED</span>
+                            <button onClick={() => playCry(currentId)} className="bg-blue-500 hover:bg-blue-400 active:bg-blue-600 text-white px-4 py-2 rounded shadow text-xs font-bold uppercase tracking-wider flex items-center gap-2 transition-all"><Icons.Volume2 size={16} /> Play Cry</button>
+                            <span className="text-gray-500 text-xs font-mono">VER. 3.3 UNLIMITED</span>
                         </div>
                     </div>
                 </div>
@@ -558,8 +449,8 @@
             
             const [selectedGens, setSelectedGens] = useState(new Set([1])); 
             const [selectedTypes, setSelectedTypes] = useState(new Set());
-            const [typeCache, setTypeCache] = useState({});
-            const [filterLoading, setFilterLoading] = useState(false);
+            const [selectedStages, setSelectedStages] = useState(new Set()); // 1, 2, 3
+            const [filterFullyEvolved, setFilterFullyEvolved] = useState(false);
 
             const toggleSet = (currentSet, item) => {
                 const newSet = new Set(currentSet);
@@ -568,61 +459,57 @@
                 return newSet;
             };
 
-            useEffect(() => {
-                const fetchMissingTypes = async () => {
-                    const missingTypes = Array.from(selectedTypes).filter(t => !typeCache[t]);
-                    if (missingTypes.length === 0) return;
-
-                    setFilterLoading(true);
-                    try {
-                        const newCache = { ...typeCache };
-                        await Promise.all(missingTypes.map(async (type) => {
-                            const res = await fetch(`https://pokeapi.co/api/v2/type/${type}`);
-                            const data = await res.json();
-                            const ids = new Set(data.pokemon.map(p => getIdFromUrl(p.pokemon.url)));
-                            newCache[type] = ids;
-                        }));
-                        setTypeCache(newCache);
-                    } catch (err) {
-                        console.error("Failed to fetch type data", err);
-                    } finally {
-                        setFilterLoading(false);
-                    }
-                };
-
-                if (selectedTypes.size > 0) fetchMissingTypes();
-            }, [selectedTypes]);
-            
             const filteredPokemon = useMemo(() => {
                 if (loading) return [];
                 return pokemon.filter(p => {
+                    // 1. Search
                     if (searchTerm) {
                         const searchLower = searchTerm.toLowerCase();
                         if (!p.name.toLowerCase().includes(searchLower) && !String(p.id).includes(searchLower)) return false;
                     }
+                    
+                    // 2. Generation (OR Logic)
                     if (selectedGens.size > 0) {
                         let inGen = false;
                         for (const genId of selectedGens) {
-                            const gen = GENERATIONS.find(g => g.id === genId);
-                            if (p.id >= gen.range[0] && p.id <= gen.range[1]) {
+                            // The new GraphQL data has direct generation_id
+                            if (p.generation === genId) {
                                 inGen = true;
                                 break;
                             }
                         }
                         if (!inGen) return false;
                     }
+
+                    // 3. Types (AND Logic - must match all selected)
                     if (selectedTypes.size > 0) {
                         for (const type of selectedTypes) {
-                            if (!typeCache[type] || !typeCache[type].has(p.id)) return false;
+                            if (!p.types.has(type)) return false;
                         }
                     }
+
+                    // 4. Evolution Stage (OR Logic for stages)
+                    if (selectedStages.size > 0) {
+                        if (!selectedStages.has(p.stage)) return false;
+                    }
+
+                    // 5. Fully Evolved (AND Logic)
+                    if (filterFullyEvolved) {
+                        if (!p.isFullyEvolved) return false;
+                    }
+
                     return true;
                 });
-            }, [pokemon, searchTerm, selectedGens, selectedTypes, typeCache, loading]);
+            }, [pokemon, searchTerm, selectedGens, selectedTypes, selectedStages, filterFullyEvolved, loading]);
+
+            const STAGES = [
+                { id: 1, name: 'Basic' },
+                { id: 2, name: 'Stage 1' },
+                { id: 3, name: 'Stage 2' },
+            ];
 
             return (
                 <div className="max-w-7xl mx-auto min-h-screen flex flex-col relative">
-                    {/* Top Bar */}
                     <div className="bg-red-600 sticky top-0 z-30 shadow-2xl border-b-8 border-red-800">
                         <div className="max-w-7xl mx-auto px-4 py-4">
                             <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
@@ -630,55 +517,42 @@
                                     <div className="h-12 w-12 bg-blue-400 rounded-full border-4 border-white shadow-[0_0_15px_rgba(59,130,246,0.5)] relative overflow-hidden group">
                                         <div className="absolute top-2 left-2 w-3 h-3 bg-white/50 rounded-full blur-[1px]"></div>
                                     </div>
-                                    <div>
-                                        <h1 className="text-2xl font-black text-white uppercase tracking-tighter italic transform -skew-x-6">Pokedex <span className="text-red-900 text-lg not-italic">Ultimate</span></h1>
-                                    </div>
+                                    <div><h1 className="text-2xl font-black text-white uppercase tracking-tighter italic transform -skew-x-6">Pokedex <span className="text-red-900 text-lg not-italic">Ultimate</span></h1></div>
                                 </div>
                                 <div className="relative w-full md:w-96">
-                                    <input
-                                        type="text"
-                                        placeholder="Search Pokemon or ID..."
-                                        className="w-full bg-gray-800 text-green-400 border-2 border-gray-600 rounded-lg py-2 pl-10 pr-4 focus:outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 font-mono placeholder-gray-600"
-                                        value={searchTerm}
-                                        onChange={(e) => setSearchTerm(e.target.value)}
-                                    />
+                                    <input type="text" placeholder="Search Pokemon or ID..." className="w-full bg-gray-800 text-green-400 border-2 border-gray-600 rounded-lg py-2 pl-10 pr-4 focus:outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 font-mono placeholder-gray-600" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
                                     <div className="absolute left-3 top-2.5 text-gray-500"><Icons.Search size={18} /></div>
                                 </div>
                             </div>
                         </div>
                     </div>
 
-                    {/* Filter Panel */}
                     {showFilters && (
                         <div className="bg-gray-800 border-b border-gray-700 p-4 animate-in slide-in-from-top-2 duration-200">
-                            <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-6">
                                 <div>
-                                    <div className="flex justify-between items-center mb-3">
-                                        <h3 className="text-gray-400 font-mono text-sm font-bold uppercase">Generations:</h3>
-                                        <button onClick={() => setSelectedGens(new Set())} className="text-red-400 text-xs font-bold hover:text-red-300 underline uppercase">Clear</button>
-                                    </div>
+                                    <div className="flex justify-between items-center mb-3"><h3 className="text-gray-400 font-mono text-sm font-bold uppercase">Generations:</h3><button onClick={() => setSelectedGens(new Set())} className="text-red-400 text-xs font-bold hover:text-red-300 underline uppercase">Clear</button></div>
                                     <div className="flex flex-wrap gap-2">
-                                        {GENERATIONS.map((gen) => (
-                                            <button key={gen.id} onClick={() => setSelectedGens(toggleSet(selectedGens, gen.id))} className={`px-3 py-1 rounded text-xs font-bold uppercase tracking-wider transition-all border-2 ${selectedGens.has(gen.id) ? 'bg-blue-600 border-blue-400 text-white shadow-[0_0_10px_rgba(37,99,235,0.5)]' : 'bg-gray-700 border-gray-600 text-gray-400 hover:bg-gray-600'}`}>{gen.name}</button>
-                                        ))}
+                                        {GENERATIONS.map((gen) => <button key={gen.id} onClick={() => setSelectedGens(toggleSet(selectedGens, gen.id))} className={`px-3 py-1 rounded text-xs font-bold uppercase tracking-wider transition-all border-2 ${selectedGens.has(gen.id) ? 'bg-blue-600 border-blue-400 text-white shadow-[0_0_10px_rgba(37,99,235,0.5)]' : 'bg-gray-700 border-gray-600 text-gray-400 hover:bg-gray-600'}`}>{gen.name}</button>)}
                                     </div>
                                 </div>
                                 <div>
-                                    <div className="flex justify-between items-center mb-3">
-                                        <h3 className="text-gray-400 font-mono text-sm font-bold uppercase">Types <span className="text-xs normal-case opacity-60">(Match All)</span>:</h3>
-                                        <button onClick={() => setSelectedTypes(new Set())} className="text-red-400 text-xs font-bold hover:text-red-300 underline uppercase">Clear</button>
+                                    <div className="flex justify-between items-center mb-3"><h3 className="text-gray-400 font-mono text-sm font-bold uppercase">Evolution:</h3><button onClick={() => {setSelectedStages(new Set()); setFilterFullyEvolved(false);}} className="text-red-400 text-xs font-bold hover:text-red-300 underline uppercase">Clear</button></div>
+                                    <div className="flex flex-wrap gap-2 mb-2">
+                                        {STAGES.map((s) => <button key={s.id} onClick={() => setSelectedStages(toggleSet(selectedStages, s.id))} className={`px-3 py-1 rounded text-xs font-bold uppercase tracking-wider transition-all border-2 ${selectedStages.has(s.id) ? 'bg-purple-600 border-purple-400 text-white shadow-[0_0_10px_rgba(147,51,234,0.5)]' : 'bg-gray-700 border-gray-600 text-gray-400 hover:bg-gray-600'}`}>{s.name}</button>)}
                                     </div>
+                                    <button onClick={() => setFilterFullyEvolved(!filterFullyEvolved)} className={`w-full px-3 py-1 rounded text-xs font-bold uppercase tracking-wider transition-all border-2 flex items-center justify-center gap-2 ${filterFullyEvolved ? 'bg-green-600 border-green-400 text-white shadow-[0_0_10px_rgba(22,163,74,0.5)]' : 'bg-gray-700 border-gray-600 text-gray-400 hover:bg-gray-600'}`}>{filterFullyEvolved && <Icons.Check size={14} />} Fully Evolved Only</button>
+                                </div>
+                                <div>
+                                    <div className="flex justify-between items-center mb-3"><h3 className="text-gray-400 font-mono text-sm font-bold uppercase">Types <span className="text-xs normal-case opacity-60">(Match All)</span>:</h3><button onClick={() => setSelectedTypes(new Set())} className="text-red-400 text-xs font-bold hover:text-red-300 underline uppercase">Clear</button></div>
                                     <div className="flex flex-wrap gap-2">
-                                        {Object.keys(TYPE_COLORS).map((type) => (
-                                            <button key={type} onClick={() => setSelectedTypes(toggleSet(selectedTypes, type))} className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider transition-all border-2 ${selectedTypes.has(type) ? `${TYPE_COLORS[type]} border-white text-white shadow-[0_0_10px_rgba(255,255,255,0.5)] scale-105` : 'bg-gray-700 border-gray-600 text-gray-400 hover:bg-gray-600'}`}><div className="flex items-center gap-1">{type}{selectedTypes.has(type) && <Icons.Check size={12} />}</div></button>
-                                        ))}
+                                        {Object.keys(TYPE_COLORS).map((type) => <button key={type} onClick={() => setSelectedTypes(toggleSet(selectedTypes, type))} className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider transition-all border-2 ${selectedTypes.has(type) ? `${TYPE_COLORS[type]} border-white text-white shadow-[0_0_10px_rgba(255,255,255,0.5)] scale-105` : 'bg-gray-700 border-gray-600 text-gray-400 hover:bg-gray-600'}`}><div className="flex items-center gap-1">{type}{selectedTypes.has(type) && <Icons.Check size={12} />}</div></button>)}
                                     </div>
                                 </div>
                             </div>
                         </div>
                     )}
 
-                    {/* Main Content */}
                     <main className="flex-1 p-4 md:p-8">
                         {loading ? (
                             <div className="flex flex-col items-center justify-center mt-20 space-y-4">
@@ -691,24 +565,15 @@
                                     <span>Found {filteredPokemon.length} Pokémon</span>
                                     <button onClick={() => setShowFilters(!showFilters)} className={`flex items-center gap-2 px-3 py-1 rounded border transition-colors ${showFilters ? 'bg-gray-700 border-gray-500 text-white' : 'border-gray-700 hover:border-gray-500 hover:text-white'}`}><Icons.Filter size={16} /><span>Filters</span><Icons.ChevronDown size={14} className={`transition-transform ${showFilters ? 'rotate-180' : ''}`} /></button>
                                 </div>
-                                {filterLoading ? (
-                                     <div className="py-20 text-center">
-                                         <div className="inline-block w-8 h-8 border-4 border-green-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-                                         <p className="text-green-400 font-mono">Processing Filter Data...</p>
-                                     </div>
-                                ) : (
-                                    <>
-                                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 pb-10">
-                                            {filteredPokemon.map((p) => <PokemonCard key={p.id} p={p} onClick={setSelectedPokemon} />)}
-                                        </div>
-                                        {filteredPokemon.length === 0 && (
-                                            <div className="text-center py-20 text-gray-500">
-                                                <p className="text-xl font-bold mb-2">No Pokemon Found</p>
-                                                <p>Try adjusting your generation or type filters.</p>
-                                                <button onClick={() => {setSelectedGens(new Set([1])); setSelectedTypes(new Set()); setSearchTerm('');}} className="mt-4 text-blue-400 hover:text-blue-300 underline">Reset to Default (Gen 1)</button>
-                                            </div>
-                                        )}
-                                    </>
+                                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 pb-10">
+                                    {filteredPokemon.map((p) => <PokemonCard key={p.id} p={p} onClick={setSelectedPokemon} />)}
+                                </div>
+                                {filteredPokemon.length === 0 && (
+                                    <div className="text-center py-20 text-gray-500">
+                                        <p className="text-xl font-bold mb-2">No Pokemon Found</p>
+                                        <p>Try adjusting your generation or type filters.</p>
+                                        <button onClick={() => {setSelectedGens(new Set([1])); setSelectedTypes(new Set()); setSearchTerm(''); setSelectedStages(new Set()); setFilterFullyEvolved(false);}} className="mt-4 text-blue-400 hover:text-blue-300 underline">Reset to Default (Gen 1)</button>
+                                    </div>
                                 )}
                             </>
                         )}
